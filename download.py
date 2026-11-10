@@ -254,6 +254,18 @@ class stepModCount(QDialog):
 
     def _on_mods_fetched(self, mods):
         qDebug(f"[NXMColDL] Mods Info: {var.cleanJson(mods)}")
+        revision = mods.get("collectionRevision", {})
+        var.gameVersions = [
+            v.get("reference") for v in revision.get("gameVersions") or []
+            if v.get("reference")
+        ]
+        var.installationInfo = revision.get("installationInfo")
+        var.declaredModCount = revision.get("modCount") or 0
+        var.declaredTotalSize = int(revision.get("totalSize") or 0)
+        qDebug(
+            f"[NXMColDL] Collection targets game version(s) {var.gameVersions},"
+            f" {var.declaredModCount} mods, {var.declaredTotalSize / 1024**3:.1f} GiB"
+        )
         for mod in mods.get("collectionRevision", {}).get("modFiles", []):
             if not mod.get("optional"):
                 var.essentialMods.append(mod)

@@ -19,6 +19,13 @@ thumbnail = None
 
 essentialMods = []
 optionalMods = []
+# What the collection says about itself: the game versions it was built for,
+# how many mods it really has, its total size and the author's own install
+# notes. Obtained from the same public GraphQL response as the mod list.
+gameVersions = []
+installationInfo = None
+declaredModCount = 0
+declaredTotalSize = 0
 externalMods = []
 bundledMods = []
 
@@ -97,6 +104,10 @@ def saveCollectionMetadata(base_path: Path):
         "externalMods": externalMods,
         "timestamp": datetime.now().isoformat(),
         "totalMods": len(essentialMods) + len(chosenOptional),
+        "gameVersions": gameVersions,
+        "installationInfo": installationInfo,
+        "declaredModCount": declaredModCount,
+        "declaredTotalSize": declaredTotalSize,
     }
 
     # Save to file

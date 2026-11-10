@@ -22,6 +22,47 @@ from PyQt6.QtWidgets import (
 from . import __meta__, var
 
 
+def game_version(exe_path) -> str:
+    """The version stamped on the game's own exe (ProductVersion), or "".
+
+    A collection is built for one game version, and mods that hook the game
+    break quietly on another. Read from the exe rather than from a file the
+    collection ships, because it is the only thing on this machine that says
+    what is actually installed.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        path = str(exe_path)
+        size = ctypes.windll.version.GetFileVersionInfoSizeW(path, None)
+        if not size:
+            return ""
+        buf = ctypes.create_string_buffer(size)
+        if not ctypes.windll.version.GetFileVersionInfoW(path, 0, size, buf):
+            return ""
+        value = ctypes.c_void_p()
+        length = wintypes.UINT()
+        if not ctypes.windll.version.VerQueryValueW(
+            buf,
+            "\\VarFileInfo\\Translation",
+            ctypes.byref(value),
+            ctypes.byref(length),
+        ):
+            return ""
+        words = ctypes.cast(value, ctypes.POINTER(wintypes.WORD))
+        lang, codepage = words[0], words[1]
+        sub = f"\\StringFileInfo\\{lang:04x}{codepage:04x}\\ProductVersion"
+        if not ctypes.windll.version.VerQueryValueW(
+            buf, sub, ctypes.byref(value), ctypes.byref(length)
+        ):
+            return ""
+        return ctypes.wstring_at(value, length.value).strip("\x00")
+    except Exception as e:
+        trace(f"could not read the game version: {e}")
+        return ""
+
+
 def trace(message: str) -> None:
     """One breadcrumb a human can read after the fact.
 
@@ -86,6 +127,10 @@ class stepSelectCollection(QDialog):
         layout.addWidget(self.submit_btn)
 
         self.setLayout(layout)
+
+        # What this machine is running; filled in on first ask (see
+        # installed_game_version).
+        self._game_version = None
 
     def showEvent(self, event):
         """Refresh collections list every time the dialog is shown"""
@@ -169,6 +214,25 @@ class stepSelectCollection(QDialog):
             )
 
             # Update info label
+            versions = self.current_metadata.get("gameVersions") or []
+            declared = ", ".join(versions) if versions else "not stated"
+            size_gib = (self.current_metadata.get("declaredTotalSize") or 0) / 1024**3
+            notes = (self.current_metadata.get("installationInfo") or "").strip()
+            # What this machine actually has, so a collection built for another
+            # game version is visible before 30 GB of mods go on, not after.
+            installed = self.installed_game_version()
+            verdict = ""
+            if versions and installed:
+                if any(
+                    installed == v or installed.startswith(v) or v.startswith(installed)
+                    for v in versions
+                ):
+                    verdict = f'<span style="color:green">matches {installed}</span>'
+                else:
+                    verdict = (
+                        f'<span style="color:red">this install is {installed} —'
+                        " mods may break</span>"
+                    )
             self.info.setText(f"""
 				<h2 style="margin:0;padding:0">{name}</h2>
 				<br>
@@ -181,6 +245,11 @@ class stepSelectCollection(QDialog):
 				<b>Total Mods:</b> {total_mods}
 				<br>
 				<b>Downloaded:</b> {timestamp.split("T")[0] if "T" in timestamp else timestamp}
+				<br>
+				<b>Built for game version:</b> {declared} {verdict}
+				<br>
+				<b>Size when installed:</b> {size_gib:.1f} GiB
+				{'<br><br><b>Author&rsquo;s install notes:</b><br>' + notes if notes else ''}
 			""")
 
             # Update thumbnail
@@ -201,6 +270,20 @@ class stepSelectCollection(QDialog):
             )
             qDebug(f"[NXMColDL] Error loading metadata: {e}")
             self.submit_btn.setEnabled(False)
+
+    def installed_game_version(self) -> str:
+        """The game's own version here, or "" when it cannot be read."""
+        if self._game_version is None:
+            self._game_version = ""
+            try:
+                plugin = getattr(__meta__, "_install_plugin", None)
+                organizer = plugin._organizer
+                game = organizer.managedGame()
+                exe = Path(game.gameDirectory().absolutePath()) / game.binaryName()
+                self._game_version = game_version(exe)
+            except Exception as e:
+                trace(f"could not locate the game to read its version: {e}")
+        return self._game_version
 
     def submit(self):
         """Proceed to next step with selected collection"""
@@ -337,6 +420,27 @@ class stepInstallMods(QDialog):
             self.progress_bar.setMaximum(len(mods_to_install))
 
             self.log(f"Total mods to install: {len(mods_to_install)}")
+            versions = var.gameVersions or []
+            if versions:
+                trace(f"collection built for game version(s) {versions}")
+                self.log(
+                    "Collection is built for game version: " + ", ".join(versions)
+                )
+            if var.declaredTotalSize:
+                self.log(
+                    f"The collection is {var.declaredTotalSize / 1024**3:.1f} GiB"
+                    " when installed."
+                )
+            # **The FOMOD answers are not obtainable.** Nexus' public GraphQL
+            # exposes no choices for a collection mod, and the manifest that
+            # carries them needs an API key, so a mod with a FOMOD still asks
+            # its own questions. Said once, here, rather than leaving the
+            # operator to wonder why the collection did not decide for them.
+            self.log(
+                "Mods with a FOMOD installer will ask you their own questions:"
+                " Nexus does not publish the collection's answers.",
+                "warning",
+            )
 
             # Get initial mod count to determine starting priority
             # Collection mods will be placed at the end of the current mod list

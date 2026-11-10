@@ -107,6 +107,13 @@ def fetchModInfo(url):
     query = """
             query CollectionRevisionMods($revision: Int, $slug: String!, $viewAdultContent: Boolean) {
                 collectionRevision(revision: $revision, slug: $slug, viewAdultContent: $viewAdultContent) {
+                    revisionNumber
+                    modCount
+                    totalSize
+                    installationInfo
+                    gameVersions {
+                        reference
+                    }
                     externalResources {
                         id
                         name
