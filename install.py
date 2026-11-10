@@ -227,8 +227,12 @@ class stepSelectCollection(QDialog):
 
         self.close()
 
-        # Proceed to installation step
-        stepInstallMods(self.parent()).exec()
+        # Proceed to installation step. The activation happens after the
+        # dialog has closed: inside it, MO2's refresh deadlocks (see the note
+        # in startInstallation).
+        installer = stepInstallMods(self.parent())
+        installer.exec()
+        installer.applyInstalled()
 
 
 class stepInstallMods(QDialog):
@@ -270,8 +274,36 @@ class stepInstallMods(QDialog):
 
         self.setLayout(layout)
 
+        # What was installed and at which priority. Applied after this dialog
+        # has closed; see the note where it is filled in.
+        self.pending_activation = []
+        self.organizer = None
+
         # Start installation after dialog is shown
         QTimer.singleShot(100, self.startInstallation)
+
+    def applyInstalled(self):
+        """Switch on and order what was installed, once MO2 owns the loop again.
+
+        Called after `exec()` has returned, so this runs from MO2's own event
+        loop rather than from a nested one — that nested loop is what made
+        `setActive` hang.
+        """
+        if self.organizer is None or not self.pending_activation:
+            return
+        trace(f"activation start: {len(self.pending_activation)} mods")
+        modlist = self.organizer.modList()
+        for internal_name, priority in self.pending_activation:
+            try:
+                modlist.setActive(internal_name, True)
+                if not modlist.setPriority(internal_name, priority):
+                    qDebug(
+                        f"[NXMColDL] could not give {internal_name!r} priority"
+                        f" {priority}"
+                    )
+            except Exception as e:
+                qDebug(f"[NXMColDL] activating {internal_name!r} failed: {e}")
+        trace("activation done")
 
     def log(self, message, level="info"):
         color = "black"
@@ -297,6 +329,7 @@ class stepInstallMods(QDialog):
                 return
 
             organizer = plugin_instance._organizer
+            self.organizer = organizer
             modlist = organizer.modList()
 
             # Get all mods to install in order
@@ -394,24 +427,19 @@ class stepInstallMods(QDialog):
                 try:
                     if installed_mod:
                         internal_name = installed_mod.name()
-                        trace(f"setActive start: {internal_name}")
-                        modlist.setActive(internal_name, True)
-                        trace("setActive done")
                         self.log(f"  Installed as: {internal_name}", "success")
 
-                        # Set priority to maintain collection order
+                        # **Activated later, not here.** Enabling a mod makes
+                        # MO2 refresh its mod list and deployment, and doing
+                        # that from inside this dialog's own event loop
+                        # deadlocks MO2: the refresh starts ("refresher: using
+                        # 10 threads") and never returns, because the thread it
+                        # wants is the one running this dialog. The list is
+                        # collected and applied by `applyInstalled()` once the
+                        # dialog is gone — which is the same place a click on a
+                        # checkbox would run from.
                         target_priority = base_priority + len(installed_mods)
-                        trace(f"setPriority start: {target_priority}")
-                        if modlist.setPriority(internal_name, target_priority):
-                            trace("setPriority done")
-                            self.log(f"  Priority set to: {target_priority}", "success")
-                        else:
-                            trace("setPriority refused")
-                            self.log(
-                                f"  WARNING: Failed to set priority to {target_priority}",
-                                "warning",
-                            )
-
+                        self.pending_activation.append((internal_name, target_priority))
                         installed_mods.append(internal_name)
                         installed_mod_names.add(internal_name.casefold())
                     else:
@@ -437,6 +465,13 @@ class stepInstallMods(QDialog):
             qDebug(
                 f"[NXMColDL] Installation complete: {len(installed_mods)}/{len(mods_to_install)} succeeded"
             )
+
+            if self.pending_activation:
+                self.log(
+                    f"  {len(self.pending_activation)} of them will be switched on"
+                    " when this window closes.",
+                    "warning",
+                )
 
             if skipped_mods:
                 self.log("", "warning")
