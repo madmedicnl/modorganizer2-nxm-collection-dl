@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
@@ -19,6 +20,22 @@ from PyQt6.QtWidgets import (
 )
 
 from . import __meta__, var
+
+
+def trace(message: str) -> None:
+    """One breadcrumb a human can read after the fact.
+
+    Two places, on purpose: `qDebug` reaches MO2's log only when its log level
+    is Debug, and the log inside the install dialog cannot repaint once the
+    event loop blocks — so a stuck batch install otherwise leaves no evidence
+    at all. This file is written from Python and does not care about either.
+    """
+    qDebug(f"[NXMColDL step] {message}")
+    try:
+        with open(Path(__file__).with_name("steps.log"), "a", encoding="utf-8") as f:
+            f.write(time.strftime("%H:%M:%S ") + message + "\n")
+    except Exception:
+        pass
 
 
 class stepSelectCollection(QDialog):
@@ -356,28 +373,20 @@ class stepInstallMods(QDialog):
                 if not safe_name:
                     safe_name = f"mod {mod_id}"
                 if safe_name != mod_name:
-                    qDebug(
-                        f"[NXMColDL step] name sanitised: {mod_name!r} -> {safe_name!r}"
-                    )
+                    trace(f"name sanitised: {mod_name!r} -> {safe_name!r}")
 
                 # **Breadcrumbs in MO2's log, one per step.** The log in this
                 # window stops repainting the moment the event loop blocks, so
                 # a hang here says nothing about where it hung; the log file
                 # does, and it is the only evidence a stuck install leaves.
-                qDebug(
-                    f"[NXMColDL step] [{idx}/{len(mods_to_install)}] installMod start:"
-                    f" {safe_name}"
-                )
+                trace(f"[{idx}/{len(mods_to_install)}] installMod start: {safe_name}")
                 # MO2's installer — and, for a FOMOD, its wizard — is a window
                 # of its own and blocks until it is answered. Hidden first, so
                 # that wizard is not buried under this dialog.
                 try:
                     installed_mod = organizer.installMod(str(download_path), safe_name)
                 finally:
-                    qDebug(
-                        f"[NXMColDL step] [{idx}/{len(mods_to_install)}] installMod"
-                        " returned"
-                    )
+                    trace(f"[{idx}/{len(mods_to_install)}] installMod returned")
                     self.show()
                     self.raise_()
                     self.activateWindow()
@@ -385,21 +394,19 @@ class stepInstallMods(QDialog):
                 try:
                     if installed_mod:
                         internal_name = installed_mod.name()
-                        qDebug(f"[NXMColDL step] setActive start: {internal_name}")
+                        trace(f"setActive start: {internal_name}")
                         modlist.setActive(internal_name, True)
-                        qDebug("[NXMColDL step] setActive done")
+                        trace("setActive done")
                         self.log(f"  Installed as: {internal_name}", "success")
 
                         # Set priority to maintain collection order
                         target_priority = base_priority + len(installed_mods)
-                        qDebug(
-                            f"[NXMColDL step] setPriority start: {target_priority}"
-                        )
+                        trace(f"setPriority start: {target_priority}")
                         if modlist.setPriority(internal_name, target_priority):
-                            qDebug("[NXMColDL step] setPriority done")
+                            trace("setPriority done")
                             self.log(f"  Priority set to: {target_priority}", "success")
                         else:
-                            qDebug("[NXMColDL step] setPriority refused")
+                            trace("setPriority refused")
                             self.log(
                                 f"  WARNING: Failed to set priority to {target_priority}",
                                 "warning",
