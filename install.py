@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
@@ -346,19 +347,59 @@ class stepInstallMods(QDialog):
                 download_path = download_map[download_key]
                 self.log(f"  Found: {download_path.name}")
 
-                # Install the mod
+                # **A mod name is a Windows folder name.** A title like
+                # "X4: Foundations" makes MO2 ask for a valid name in a prompt
+                # of its own, and that prompt never reaches the loop this
+                # dialog runs in: the install sits there for ever. Sanitised
+                # here, the mod is named without asking. See upstream #34.
+                safe_name = re.sub(r'[\\/*?:"<>|]', "", mod_name).strip()
+                if not safe_name:
+                    safe_name = f"mod {mod_id}"
+                if safe_name != mod_name:
+                    qDebug(
+                        f"[NXMColDL step] name sanitised: {mod_name!r} -> {safe_name!r}"
+                    )
+
+                # **Breadcrumbs in MO2's log, one per step.** The log in this
+                # window stops repainting the moment the event loop blocks, so
+                # a hang here says nothing about where it hung; the log file
+                # does, and it is the only evidence a stuck install leaves.
+                qDebug(
+                    f"[NXMColDL step] [{idx}/{len(mods_to_install)}] installMod start:"
+                    f" {safe_name}"
+                )
+                # MO2's installer — and, for a FOMOD, its wizard — is a window
+                # of its own and blocks until it is answered. Hidden first, so
+                # that wizard is not buried under this dialog.
                 try:
-                    installed_mod = organizer.installMod(str(download_path), mod_name)
+                    installed_mod = organizer.installMod(str(download_path), safe_name)
+                finally:
+                    qDebug(
+                        f"[NXMColDL step] [{idx}/{len(mods_to_install)}] installMod"
+                        " returned"
+                    )
+                    self.show()
+                    self.raise_()
+                    self.activateWindow()
+                    QApplication.processEvents()
+                try:
                     if installed_mod:
                         internal_name = installed_mod.name()
+                        qDebug(f"[NXMColDL step] setActive start: {internal_name}")
                         modlist.setActive(internal_name, True)
+                        qDebug("[NXMColDL step] setActive done")
                         self.log(f"  Installed as: {internal_name}", "success")
 
                         # Set priority to maintain collection order
                         target_priority = base_priority + len(installed_mods)
+                        qDebug(
+                            f"[NXMColDL step] setPriority start: {target_priority}"
+                        )
                         if modlist.setPriority(internal_name, target_priority):
+                            qDebug("[NXMColDL step] setPriority done")
                             self.log(f"  Priority set to: {target_priority}", "success")
                         else:
+                            qDebug("[NXMColDL step] setPriority refused")
                             self.log(
                                 f"  WARNING: Failed to set priority to {target_priority}",
                                 "warning",
