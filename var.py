@@ -24,6 +24,11 @@ optionalMods = []
 # notes. Obtained from the same public GraphQL response as the mod list.
 gameVersions = []
 installationInfo = None
+# The revision's own ids, for the manifest URL, and the FOMOD answers it
+# carries: "modId:fileId" -> the collection's choice for that file.
+collectionId = 0
+revisionId = 0
+choices = {}
 declaredModCount = 0
 declaredTotalSize = 0
 externalMods = []
@@ -107,6 +112,9 @@ def saveCollectionMetadata(base_path: Path):
         "gameVersions": gameVersions,
         "installationInfo": installationInfo,
         "declaredModCount": declaredModCount,
+        "collectionId": collectionId,
+        "revisionId": revisionId,
+        "choices": choices,
         "declaredTotalSize": declaredTotalSize,
     }
 

@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import __meta__, var
+from .api import choiceText, fetchManifest, choicesFromManifest
 
 
 def game_version(exe_path) -> str:
@@ -293,6 +294,9 @@ class stepSelectCollection(QDialog):
 
         # Store metadata in var for use in subsequent steps
         var.uri = self.current_metadata.get("uri")
+        var.collectionId = self.current_metadata.get("collectionId") or 0
+        var.revisionId = self.current_metadata.get("revisionId") or 0
+        var.choices = self.current_metadata.get("choices") or {}
         var.game = self.current_metadata.get("game")
         var.collection = self.current_metadata.get("collection")
         var.revision = self.current_metadata.get("revision")
@@ -420,6 +424,27 @@ class stepInstallMods(QDialog):
             self.progress_bar.setMaximum(len(mods_to_install))
 
             self.log(f"Total mods to install: {len(mods_to_install)}")
+
+            # **The collection's FOMOD answers, if they are not cached yet.** A
+            # collection downloaded before this existed has none; fetching them
+            # here means an operator does not have to download it again.
+            if not var.choices and var.collectionId and var.revisionId:
+                self.log("Looking up the collection's own choices...")
+                manifest = fetchManifest(var.collectionId, var.revisionId)
+                var.choices = choicesFromManifest(manifest)
+                if var.choices:
+                    self.log(
+                        f"The collection's choices are known for {len(var.choices)}"
+                        " mod(s).",
+                        "success",
+                    )
+                else:
+                    self.log(
+                        "The collection's own choices are not available (MO2's"
+                        " Nexus key, or Nexus not answering); each FOMOD will ask"
+                        " you.",
+                        "warning",
+                    )
             versions = var.gameVersions or []
             if versions:
                 trace(f"collection built for game version(s) {versions}")
@@ -484,6 +509,16 @@ class stepInstallMods(QDialog):
                 self.log(f"[{idx}/{len(mods_to_install)}] Processing: {mod_name}")
                 self.log(f"  File: {file_name} (ModID: {mod_id}, FileID: {file_id})")
 
+                # **What the collection itself chose**, where Nexus publishes it.
+                # MO2's installer cannot be handed answers from a plugin, so the
+                # wizard still asks — but it asks an operator who can see what
+                # the maker picked. Said before the "already installed" skip, so
+                # a collection that is on disk already can be read for its
+                # answers too.
+                choice = choiceText(var.choices.get(f"{mod_id}:{file_id}"))
+                if choice:
+                    self.log(f"  The collection chose: {choice}", "warning")
+
                 if mod_name.casefold() in installed_mod_names:
                     self.log("  Already installed - skipping", "warning")
                     skipped_mods.append(mod_name)
@@ -500,6 +535,7 @@ class stepInstallMods(QDialog):
 
                 download_path = download_map[download_key]
                 self.log(f"  Found: {download_path.name}")
+
 
                 # **A mod name is a Windows folder name.** A title like
                 # "X4: Foundations" makes MO2 ask for a valid name in a prompt

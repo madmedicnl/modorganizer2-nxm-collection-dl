@@ -26,7 +26,13 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from .api import fetchRevisions, fetchInfo, fetchModInfo
+from .api import (
+    fetchRevisions,
+    fetchInfo,
+    fetchModInfo,
+    fetchManifest,
+    choicesFromManifest,
+)
 
 from . import __meta__
 from . import var
@@ -255,6 +261,19 @@ class stepModCount(QDialog):
     def _on_mods_fetched(self, mods):
         qDebug(f"[NXMColDL] Mods Info: {var.cleanJson(mods)}")
         revision = mods.get("collectionRevision", {})
+        var.collectionId = revision.get("collectionId") or 0
+        var.revisionId = revision.get("id") or 0
+        # **The collection's own FOMOD answers.** Nexus publishes them only in
+        # the manifest, and that needs MO2's API key (read from its credential
+        # store). Best effort: without them the install simply asks the
+        # operator, which is what it did before.
+        manifest = fetchManifest(var.collectionId, var.revisionId)
+        var.choices = choicesFromManifest(manifest)
+        if var.choices:
+            qDebug(
+                f"[NXMColDL] manifest: {len(var.choices)} mod(s) carry the"
+                f" collection's own FOMOD answers"
+            )
         var.gameVersions = [
             v.get("reference") for v in revision.get("gameVersions") or []
             if v.get("reference")
